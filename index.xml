@@ -1,0 +1,304 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>jsliang.art</title><link>https://www.jsliang.art/</link><description>jsliang.art</description><generator>Hugo -- gohugo.io</generator><language>en</language><atom:link href="https://www.jsliang.art/index.xml" rel="self" type="application/rss+xml"/><item><title>How I Pinpointed the Performance Bottleneck</title><link>https://www.jsliang.art/blog/how-i-pinpointed-the-performance-bottleneck/</link><pubDate>Wed, 17 Aug 2022 10:03:47 +0800</pubDate><guid>https://www.jsliang.art/blog/how-i-pinpointed-the-performance-bottleneck/</guid><description>&lt;p>&lt;img
+srcset="
+/blog/how-i-pinpointed-the-performance-bottleneck/timetracker_hu2778512b2b8cbffd1927b5f2c5f6c304_420893_500x0_resize_box_3.png,
+/blog/how-i-pinpointed-the-performance-bottleneck/timetracker_hu2778512b2b8cbffd1927b5f2c5f6c304_420893_1000x0_resize_box_3.png 2x"
+src="https://www.jsliang.art/blog/how-i-pinpointed-the-performance-bottleneck/timetracker_hu2778512b2b8cbffd1927b5f2c5f6c304_420893_500x0_resize_box_3.png" width="500" height="337" loading="lazy"/>&lt;/p>
+&lt;p>This article is a small write-up regarding how I pinpointed the performance bottlenecks in my code during the making of &lt;a href="https://www.jsliang.art/projects/loomnatic/">Loomnatic&lt;/a>.&lt;/p>
+&lt;p>Update 2022-08-19: add instructions for &lt;a href="https://openprocessing.org/">OpenProcessing&lt;/a>&lt;/p>
+&lt;h2 id="why-find-performance-bottlenecks" >Why find performance bottlenecks?
+&lt;span>
+&lt;a href="#why-find-performance-bottlenecks">
+&lt;svg viewBox="0 0 28 23" height="100%" width="19" xmlns="http://www.w3.org/2000/svg">&lt;path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" fill="none" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2"/>&lt;path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" fill="none" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2"/>&lt;/svg>
+&lt;/a>
+&lt;/span>
+&lt;/h2>&lt;p>&lt;a href="https://www.jsliang.art/projects/loomnatic/">Loomnatic&lt;/a> is a computational-heavy project. There were quite a few performance issues during the development process due to bad algorithms. The execution time before my performance improvement is often 10+ times than after the fix. Such differences could sum up to a difference between 1+ min to 5 sec, which results in very different experiences from the viewers&amp;rsquo; perspective.&lt;/p>
+&lt;p>Performance improvement is also crucial to me because it speeds up my development. I get faster feedback on my code changes, and generating hundreds of test outputs takes significantly less time.&lt;/p>
+&lt;h2 id="timetracker" >TimeTracker
+&lt;span>
+&lt;a href="#timetracker">
+&lt;svg viewBox="0 0 28 23" height="100%" width="19" xmlns="http://www.w3.org/2000/svg">&lt;path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" fill="none" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2"/>&lt;path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" fill="none" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2"/>&lt;/svg>
+&lt;/a>
+&lt;/span>
+&lt;/h2>&lt;p>I made a &lt;code>TimeTracker&lt;/code> helper to measure the execution time of specific code blocks.&lt;/p>
+&lt;p>Here&amp;rsquo;s an OpenProcessing sketch I made to give you an idea of how it works: &lt;a href="https://openprocessing.org/sketch/1628294">TimeTracker by jsliang&lt;/a>. When you open this link and wait for several seconds, you should see the rendered sketch and a console output at the bottom, as shown in the image:&lt;/p>
+&lt;figure>
+&lt;picture>&lt;img
+srcset="
+/blog/how-i-pinpointed-the-performance-bottleneck/timetracker_hu2778512b2b8cbffd1927b5f2c5f6c304_420893_600x0_resize_box_3.png,
+/blog/how-i-pinpointed-the-performance-bottleneck/timetracker_hu2778512b2b8cbffd1927b5f2c5f6c304_420893_1200x0_resize_box_3.png 2x"
+src="https://www.jsliang.art/blog/how-i-pinpointed-the-performance-bottleneck/timetracker_hu2778512b2b8cbffd1927b5f2c5f6c304_420893_600x0_resize_box_3.png" title="an OpenProcessing sketch that demonstrates how my TimeTracker helper works" width="600" height="405" loading="lazy"/>&lt;/picture>
+&lt;figcaption>an OpenProcessing sketch that demonstrates how my TimeTracker helper works&lt;/figcaption>
+&lt;/figure>
+&lt;p>To identify performance bottlenecks, I manually insert a pair of time tracker function calls that record the timestamp before and after the code block I want to measure. The timestamp difference between the pair is the total execution time for the wrapped code block.&lt;/p>
+&lt;p>Here&amp;rsquo;s the code snippet of my &lt;code>TimeTracker&lt;/code> function:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-javascript" data-lang="javascript">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">function&lt;/span> &lt;span style="color:#a6e22e">initTimeTracker&lt;/span>() {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">const&lt;/span> &lt;span style="color:#a6e22e">stack&lt;/span> &lt;span style="color:#f92672">=&lt;/span> [];
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">function&lt;/span> &lt;span style="color:#a6e22e">getPadding&lt;/span>() {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">return&lt;/span> &lt;span style="color:#e6db74">`&lt;/span>&lt;span style="color:#e6db74">${&lt;/span>Array.&lt;span style="color:#a6e22e">from&lt;/span>({ &lt;span style="color:#a6e22e">length&lt;/span>&lt;span style="color:#f92672">:&lt;/span> &lt;span style="color:#a6e22e">stack&lt;/span>.&lt;span style="color:#a6e22e">length&lt;/span> &lt;span style="color:#f92672">-&lt;/span> &lt;span style="color:#ae81ff">1&lt;/span> &lt;span style="color:#e6db74">}&lt;/span>&lt;span style="color:#e6db74">)
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#e6db74"> .map(() =&amp;gt; &amp;#34;|&amp;#34;)
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#e6db74"> .join(&amp;#34;&amp;#34;)}+`&lt;/span>;
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> }
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#75715e">// Push the current timestamp to stack
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> &lt;span style="color:#66d9ef">function&lt;/span> &lt;span style="color:#a6e22e">push&lt;/span>(&lt;span style="color:#a6e22e">label&lt;/span>) {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">stack&lt;/span>.&lt;span style="color:#a6e22e">push&lt;/span>({ &lt;span style="color:#a6e22e">label&lt;/span>, &lt;span style="color:#a6e22e">timestamp&lt;/span>&lt;span style="color:#f92672">:&lt;/span> &lt;span style="color:#f92672">+&lt;/span>&lt;span style="color:#66d9ef">new&lt;/span> Date() });
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">console&lt;/span>.&lt;span style="color:#a6e22e">log&lt;/span>(&lt;span style="color:#e6db74">`&lt;/span>&lt;span style="color:#e6db74">${&lt;/span>&lt;span style="color:#a6e22e">getPadding&lt;/span>()&lt;span style="color:#e6db74">}&lt;/span>&lt;span style="color:#e6db74"> &lt;/span>&lt;span style="color:#e6db74">${&lt;/span>&lt;span style="color:#a6e22e">label&lt;/span>&lt;span style="color:#e6db74">}&lt;/span>&lt;span style="color:#e6db74"> START`&lt;/span>);
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> }
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#75715e">// Pop the previous timestamp from stack and calculate
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> &lt;span style="color:#75715e">// the difference between the current timestamp
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> &lt;span style="color:#66d9ef">function&lt;/span> &lt;span style="color:#a6e22e">pop&lt;/span>() {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">const&lt;/span> &lt;span style="color:#a6e22e">padding&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#a6e22e">getPadding&lt;/span>();
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">const&lt;/span> &lt;span style="color:#a6e22e">prev&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#a6e22e">stack&lt;/span>.&lt;span style="color:#a6e22e">pop&lt;/span>();
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">if&lt;/span> (&lt;span style="color:#f92672">!&lt;/span>&lt;span style="color:#a6e22e">prev&lt;/span>) {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">console&lt;/span>.&lt;span style="color:#a6e22e">error&lt;/span>(&lt;span style="color:#e6db74">`Stack is empty. Did you forget to call push() first?`&lt;/span>);
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">return&lt;/span>;
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> }
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">const&lt;/span> &lt;span style="color:#a6e22e">currTimestamp&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#f92672">+&lt;/span>&lt;span style="color:#66d9ef">new&lt;/span> Date();
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">const&lt;/span> &lt;span style="color:#a6e22e">diff&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#a6e22e">currTimestamp&lt;/span> &lt;span style="color:#f92672">-&lt;/span> &lt;span style="color:#a6e22e">prev&lt;/span>.&lt;span style="color:#a6e22e">timestamp&lt;/span>;
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">console&lt;/span>.&lt;span style="color:#a6e22e">log&lt;/span>(&lt;span style="color:#e6db74">`&lt;/span>&lt;span style="color:#e6db74">${&lt;/span>&lt;span style="color:#a6e22e">padding&lt;/span>&lt;span style="color:#e6db74">}&lt;/span>&lt;span style="color:#e6db74"> &lt;/span>&lt;span style="color:#e6db74">${&lt;/span>&lt;span style="color:#a6e22e">prev&lt;/span>.&lt;span style="color:#a6e22e">label&lt;/span>&lt;span style="color:#e6db74">}&lt;/span>&lt;span style="color:#e6db74"> DONE: &lt;/span>&lt;span style="color:#e6db74">${&lt;/span>&lt;span style="color:#a6e22e">diff&lt;/span>&lt;span style="color:#e6db74">}&lt;/span>&lt;span style="color:#e6db74">ms`&lt;/span>);
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> }
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">return&lt;/span> { &lt;span style="color:#a6e22e">push&lt;/span>, &lt;span style="color:#a6e22e">pop&lt;/span> };
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>}
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>window.&lt;span style="color:#a6e22e">TimeTracker&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#a6e22e">initTimeTracker&lt;/span>();
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>If you&amp;rsquo;re a TypeScript lover like me, you can download the TypeScript version from this Gist: &lt;a href="https://gist.github.com/jsliang-art/d819f495652c2d685381d25583326fbd">TimeTracker · GitHub&lt;/a>&lt;/p>
+&lt;p>To use my time tracker function, paste the above code snippet somewhere in your code.&lt;/p>
+&lt;p>If you develop with OpenProcessing, you can paste the above code snippet into a new file named &lt;code>TimeTracker.js&lt;/code>, then import it before your sketch in &lt;code>index.html&lt;/code>:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-html" data-lang="html">&lt;span style="display:flex;">&lt;span>&amp;lt;&lt;span style="color:#f92672">script&lt;/span> &lt;span style="color:#a6e22e">src&lt;/span>&lt;span style="color:#f92672">=&lt;/span>&lt;span style="color:#e6db74">&amp;#34;./p5.min.js&amp;#34;&lt;/span>&amp;gt;&amp;lt;/&lt;span style="color:#f92672">script&lt;/span>&amp;gt;
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&amp;lt;!-- import TimeTracker.js before mySketch.js --&amp;gt;&lt;/span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&amp;lt;&lt;span style="color:#f92672">script&lt;/span> &lt;span style="color:#a6e22e">src&lt;/span>&lt;span style="color:#f92672">=&lt;/span>&lt;span style="color:#e6db74">&amp;#34;./TimeTracker.js&amp;#34;&lt;/span>&amp;gt;&amp;lt;/&lt;span style="color:#f92672">script&lt;/span>&amp;gt;
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&amp;lt;&lt;span style="color:#f92672">script&lt;/span> &lt;span style="color:#a6e22e">src&lt;/span>&lt;span style="color:#f92672">=&lt;/span>&lt;span style="color:#e6db74">&amp;#34;./mySketch.js&amp;#34;&lt;/span>&amp;gt;&amp;lt;/&lt;span style="color:#f92672">script&lt;/span>&amp;gt;
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>(If you&amp;rsquo;re unsure whether you&amp;rsquo;re doing this correctly or not, you can refer to the source code of my &lt;a href="https://openprocessing.org/sketch/1628294">TimeTracker&lt;/a> project on OpenProcessing.)&lt;/p>
+&lt;p>The code snippet initializes a &lt;code>TimeTracker&lt;/code> object with which I can call &lt;code>TimeTracker.push(&amp;quot;code block name&amp;quot;)&lt;/code> and &lt;code>TimeTracker.pop()&lt;/code> before and after every code block that I want to measure:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-javascript" data-lang="javascript">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#a6e22e">TimeTracker&lt;/span>.&lt;span style="color:#a6e22e">push&lt;/span>(&lt;span style="color:#e6db74">&amp;#34;draw 60000 circles&amp;#34;&lt;/span>);
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#a6e22e">drawCircles&lt;/span>(&lt;span style="color:#ae81ff">10000&lt;/span>);
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#a6e22e">drawCircles&lt;/span>(&lt;span style="color:#ae81ff">20000&lt;/span>);
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#a6e22e">drawCircles&lt;/span>(&lt;span style="color:#ae81ff">30000&lt;/span>);
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#a6e22e">TimeTracker&lt;/span>.&lt;span style="color:#a6e22e">pop&lt;/span>();
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>And the console output gives me a report like this:&lt;/p>
+&lt;pre tabindex="0">&lt;code>+ TOTAL START
+|+ SETUP START
+|+ SETUP DONE: 1ms
+|+ DRAW START
+||+ draw 60000 circles START
+|||+ draw 10000 circles START
+|||+ draw 10000 circles DONE: 44ms
+|||+ draw 20000 circles START
+|||+ draw 20000 circles DONE: 1794ms
+|||+ draw 30000 circles START
+|||+ draw 30000 circles DONE: 3491ms
+||+ draw 60000 circles DONE: 5329ms
+|+ DRAW DONE: 5329ms
++ TOTAL DONE: 5366ms
+&lt;/code>&lt;/pre>&lt;p>Note that the report shows the total execution time of both parent and child functions. This nested information is extremely helpful since I usually do not know which part of my code is the most critical to the performance issues. With the nested representation, I can quickly see where I should try to improve first.&lt;/p>
+&lt;p>Besides those instrumentations, I wrap the whole code with &lt;code>TimeTracker.push(&amp;quot;TOTAL&amp;quot;)&lt;/code> which gives me the total execution time. We will use this information in the next section.&lt;/p>
+&lt;h2 id="collecting-the-execution-time-of-numerous-outputs" >Collecting the execution time of numerous outputs
+&lt;span>
+&lt;a href="#collecting-the-execution-time-of-numerous-outputs">
+&lt;svg viewBox="0 0 28 23" height="100%" width="19" xmlns="http://www.w3.org/2000/svg">&lt;path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" fill="none" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2"/>&lt;path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" fill="none" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2"/>&lt;/svg>
+&lt;/a>
+&lt;/span>
+&lt;/h2>&lt;p>Another challenge I faced while developing &lt;a href="https://www.jsliang.art/projects/loomnatic/">Loomnatic&lt;/a> was that only a minority of the variations hit the performance bottleneck. How do I identify such bad-performance variations quickly?&lt;/p>
+&lt;p>I&amp;rsquo;ve been using &lt;a href="https://twitter.com/cablesAndPixels">Laurent Houdard&lt;/a>&amp;rsquo;s &lt;a href="https://github.com/cables-and-pixels/fxsnapshot">fxsnapshot&lt;/a> to generate hundreds of outputs and test the variations for several projects. I figured I could &lt;a href="https://github.com/jsliang-art/fxsnapshot">fork&lt;/a> this repository and edit the tool to have it print out the total execution time for me.&lt;/p>
+&lt;p>In my edited version, I added this piece of code under the &lt;code>console&lt;/code> event handler in &lt;code>fxsnapshot.js&lt;/code> (&lt;a href="https://github.com/jsliang-art/fxsnapshot/blob/openprocessing/fxsnapshot.js#L55-L58">source&lt;/a>):&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-javascript" data-lang="javascript">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">const&lt;/span> &lt;span style="color:#a6e22e">totalTime&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#a6e22e">text&lt;/span>.&lt;span style="color:#a6e22e">match&lt;/span>(&lt;span style="color:#e6db74">/TOTAL DONE: (\d+ms)/&lt;/span>);
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">if&lt;/span> (&lt;span style="color:#a6e22e">totalTime&lt;/span>) {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">timeSpent&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#a6e22e">totalTime&lt;/span>[&lt;span style="color:#ae81ff">1&lt;/span>];
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>}
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>This code captures the &lt;code>TOTAL DONE: 10460ms&lt;/code> console output printed by the &lt;code>TimeTracker&lt;/code> object and stores the numeric part in the &lt;code>timeSpent&lt;/code> variable. With that, I can append the time spent information to the original output:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-javascript" data-lang="javascript">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#a6e22e">console&lt;/span>.&lt;span style="color:#a6e22e">log&lt;/span>(&lt;span style="color:#e6db74">`&lt;/span>&lt;span style="color:#e6db74">${&lt;/span>&lt;span style="color:#a6e22e">f&lt;/span>&lt;span style="color:#e6db74">}&lt;/span>&lt;span style="color:#e6db74"> &lt;/span>&lt;span style="color:#e6db74">${&lt;/span>&lt;span style="color:#a6e22e">timeSpent&lt;/span>&lt;span style="color:#e6db74">}&lt;/span>&lt;span style="color:#e6db74">`&lt;/span>);
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>If you develop with OpenProcessing, you also need to replace the URL in this line &lt;code>const url = 'http://localhost:8080'&lt;/code> with the preview URL of your sketch (&lt;a href="https://github.com/jsliang-art/fxsnapshot/blob/openprocessing/fxsnapshot.js#L9-L10">source&lt;/a>):&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-javascript" data-lang="javascript">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">const&lt;/span> &lt;span style="color:#a6e22e">SKETCH_ID&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#ae81ff">1628294&lt;/span>; &lt;span style="color:#75715e">// OpenProcessing sketch ID
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span>&lt;span style="color:#66d9ef">const&lt;/span> &lt;span style="color:#a6e22e">url&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#e6db74">`https://preview.openprocessing.org/sketch/&lt;/span>&lt;span style="color:#e6db74">${&lt;/span>&lt;span style="color:#a6e22e">SKETCH_ID&lt;/span>&lt;span style="color:#e6db74">}&lt;/span>&lt;span style="color:#e6db74">/preview/false/index.html`&lt;/span>;
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>Now I can see the execution time of each output while using the &lt;code>fxsnapshot&lt;/code> tool:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-bash" data-lang="bash">&lt;span style="display:flex;">&lt;span>fxsnapshot $ node fxsnapshot.js &lt;span style="color:#ae81ff">256&lt;/span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>images/0001-oo3dhGsAhPMjAEaoA44c9xwJtwadgyD859CATsdC2BQH7eXmaWe.png 7274ms
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>images/0002-ooTHvK2koEh8aPgxim6dyr197LcpmkbjxayoGT7ru7NwcbiabE1.png 3770ms
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>images/0003-ooRWFQEu6rmYpbvnqWSzDTpbd8zxt5rN2wGGUjpRak2bEkrW9gf.png 2839ms
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>images/0004-ooHRxtNrLktmVWQ1uYhZjQhLjqyQpdPp1uHCwKHXZScyM5QqKna.png 2696ms
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>images/0005-oo31G5WoYtHNpJc85m3LJ338ijQNBH18GEoH6u9Rj1E7gUtpwas.png 3177ms
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>images/0006-ooEcZhJfayzW3FZroNEmVVRPp2rHUXXNFq6GorDnwiGpHa5XA21.png 5529ms
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>images/0007-ooow9qFrDfVpXzkDLwyW5pAPvoLPjcPcJRfkDEN1dDjuyqaUp1j.png 3700ms
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>images/0008-ootEes3rrYm1sSpoRagXNr1JWy1k9imyumPPx3EjTC49bdkoAzg.png 5050ms
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>images/0009-ooftZwcXYqG7upCKbb5C8PYZqcEMNgRgiwLW6yUMVf9ukjwLLh7.png 16687ms
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>images/0010-oofmTwwqPYzAJJBa5KRE4fJAtznCx2q8dmtxUmRqxQqxi4zGSPG.png 3336ms
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>images/0011-ooxJv5zbrH1nXxeAFRhnkmPehZd2VoHGh8woT1SkkmzkuWp34pB.png 3810ms
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>images/0012-ooVaMFEQGTYrBDZH2BBhVFUzdY8ywFc9DFwEm8vsUeWfZukWQiW.png 8151ms
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>...
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>From the output above, I observe that output No. 9 is the outlier. It took nearly 17 seconds for No. 9 to complete the rendering, while for other outputs it took fewer than 8 seconds. I can then focus on this variation and figure out its performance bottlenecks with the steps mentioned in the previous section.&lt;/p>
+&lt;h2 id="conclusion" >Conclusion
+&lt;span>
+&lt;a href="#conclusion">
+&lt;svg viewBox="0 0 28 23" height="100%" width="19" xmlns="http://www.w3.org/2000/svg">&lt;path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" fill="none" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2"/>&lt;path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" fill="none" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2"/>&lt;/svg>
+&lt;/a>
+&lt;/span>
+&lt;/h2>&lt;p>This article explains how I measure the execution time of different parts of my code and how I tweaked &lt;a href="https://twitter.com/cablesAndPixels">Laurent Houdard&lt;/a>&amp;rsquo;s &lt;a href="https://github.com/cables-and-pixels/fxsnapshot">fxsnapshot&lt;/a> tool to help me quickly find out the execution time of various outputs. I hope this gives you some ideas.&lt;/p>
+&lt;p>If you find this helpful or have better methods to share, you can leave a comment under this &lt;a href="https://twitter.com/jsliang_/status/1559727711165497344">Tweet&lt;/a>. I will be delighted to hear from you. :)&lt;/p></description></item><item><title>Loomnatic</title><link>https://www.jsliang.art/projects/loomnatic/</link><pubDate>Tue, 16 Aug 2022 21:40:00 +0800</pubDate><guid>https://www.jsliang.art/projects/loomnatic/</guid><description>
+&lt;p>&lt;img
+srcset="
+/projects/loomnatic/loomnatic_hu192c25e751ab5ee24f29776c35a94984_8355796_400x0_resize_box_3.png,
+/projects/loomnatic/loomnatic_hu192c25e751ab5ee24f29776c35a94984_8355796_800x0_resize_box_3.png 2x"
+src="https://www.jsliang.art/projects/loomnatic/loomnatic_hu192c25e751ab5ee24f29776c35a94984_8355796_400x0_resize_box_3.png" width="400" height="400" loading="lazy"/>&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Platform:&lt;/strong> fx(hash) &lt;a href="https://www.fxhash.xyz/generative/18232">#18232&lt;/a>&lt;/li>
+&lt;li>&lt;strong>Date:&lt;/strong> August 16, 2022&lt;/li>
+&lt;li>&lt;strong>Editions:&lt;/strong> 128&lt;/li>
+&lt;li>&lt;strong>Created with:&lt;/strong> &lt;a href="https://vitejs.dev/">Vite&lt;/a>, &lt;a href="https://www.typescriptlang.org/">TypeScript&lt;/a>, Vanilla JavaScript&lt;/li>
+&lt;li>&lt;strong>Related Post:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;a href="https://www.jsliang.art/blog/how-i-pinpointed-the-performance-bottleneck/">How I Pinpointed the Performance Bottleneck&lt;/a>&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;/ul></description></item><item><title>About</title><link>https://www.jsliang.art/about/</link><pubDate>Sat, 13 Aug 2022 12:04:21 +0800</pubDate><guid>https://www.jsliang.art/about/</guid><description>&lt;p>I’m a front-end developer by day and a creative coder by night.&lt;/p>
+&lt;p>Inspired by &lt;a href="https://www.fxhash.xyz/u/s_r_r_z_">eziraro&lt;/a>&amp;rsquo;s article: &lt;a href="https://mirror.xyz/0xF7E15015D31e1Be374c21E6F1dE91147C8B5db88/tEL7_taJEbIiA4rcfZnOvHDRqnKzV2haRnnVV2YFU94">Making of the generative octopuses&lt;/a>, I started creative coding and published my first generative art project on &lt;a href="https://www.fxhash.xyz/u/jsliang">fx(hash)&lt;/a> in April 2022.&lt;/p>
+&lt;p>I&amp;rsquo;ve created several projects ever since. &lt;a href="https://www.jsliang.art/projects/mount-doodle/">Mount Doodle&lt;/a> is the most well-known one as of writing. And the latest one is &lt;a href="https://www.jsliang.art/projects/loomnatic/">Loomnatic&lt;/a>.&lt;/p>
+&lt;p>I constantly tweet about my WIPs. If you&amp;rsquo;d like to know what I am working on, please visit my Twitter profile: &lt;a href="https://twitter.com/jsliang_">@jsliang_&lt;/a>.&lt;/p></description></item><item><title>Fireworks</title><link>https://www.jsliang.art/projects/fireworks/</link><pubDate>Sun, 26 Jun 2022 11:11:00 +0800</pubDate><guid>https://www.jsliang.art/projects/fireworks/</guid><description>
+&lt;p>&lt;img
+srcset="
+/projects/fireworks/fireworks_hu5d7622475777b7483ef9a8012e5dfc3c_37454434_400x0_resize_box_3.png,
+/projects/fireworks/fireworks_hu5d7622475777b7483ef9a8012e5dfc3c_37454434_800x0_resize_box_3.png 2x"
+src="https://www.jsliang.art/projects/fireworks/fireworks_hu5d7622475777b7483ef9a8012e5dfc3c_37454434_400x0_resize_box_3.png" width="400" height="400" loading="lazy"/>&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Platform:&lt;/strong> fx(hash) &lt;a href="https://www.fxhash.xyz/generative/15541">#15541&lt;/a>&lt;/li>
+&lt;li>&lt;strong>Date:&lt;/strong> June 26th, 2022&lt;/li>
+&lt;li>&lt;strong>Editions:&lt;/strong> 256&lt;/li>
+&lt;li>&lt;strong>Created with:&lt;/strong> &lt;a href="https://github.com/fxhash/fxhash-webpack-boilerplate">fxhash-webpack-boilerplate&lt;/a>, &lt;a href="https://www.typescriptlang.org/">TypeScript&lt;/a>, &lt;a href="https://p5js.org/">p5.js&lt;/a>&lt;/li>
+&lt;/ul></description></item><item><title>Mount Doodle All-In-One</title><link>https://www.jsliang.art/projects/mount-doodle-all-in-one/</link><pubDate>Tue, 21 Jun 2022 08:39:44 +0800</pubDate><guid>https://www.jsliang.art/projects/mount-doodle-all-in-one/</guid><description>
+&lt;p>&lt;img
+srcset="
+/projects/mount-doodle-all-in-one/mount-doodle-aio_hu595428bf5bce2f8e7f691ed1dbf37763_24635305_400x0_resize_box_3.png,
+/projects/mount-doodle-all-in-one/mount-doodle-aio_hu595428bf5bce2f8e7f691ed1dbf37763_24635305_800x0_resize_box_3.png 2x"
+src="https://www.jsliang.art/projects/mount-doodle-all-in-one/mount-doodle-aio_hu595428bf5bce2f8e7f691ed1dbf37763_24635305_400x0_resize_box_3.png" width="400" height="400" loading="lazy"/>&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Platform:&lt;/strong> teia &lt;a href="https://teia.art/objkt/749387">#749387&lt;/a>&lt;/li>
+&lt;li>&lt;strong>Date:&lt;/strong> June 21st, 2022&lt;/li>
+&lt;li>&lt;strong>Editions:&lt;/strong> 330&lt;/li>
+&lt;li>&lt;strong>Created with:&lt;/strong> &lt;a href="https://github.com/fxhash/fxhash-webpack-boilerplate">fxhash-webpack-boilerplate&lt;/a>, &lt;a href="https://www.typescriptlang.org/">TypeScript&lt;/a>, &lt;a href="https://p5js.org/">p5.js&lt;/a>&lt;/li>
+&lt;/ul></description></item><item><title>When Light Meets Water</title><link>https://www.jsliang.art/projects/when-light-meets-water/</link><pubDate>Fri, 17 Jun 2022 02:04:00 +0800</pubDate><guid>https://www.jsliang.art/projects/when-light-meets-water/</guid><description>
+&lt;p>&lt;img
+srcset="
+/projects/when-light-meets-water/when-light-meets-water_hua7d52c12b65fe9240ef3d16a160ba49d_12494691_400x0_resize_box_3.png,
+/projects/when-light-meets-water/when-light-meets-water_hua7d52c12b65fe9240ef3d16a160ba49d_12494691_800x0_resize_box_3.png 2x"
+src="https://www.jsliang.art/projects/when-light-meets-water/when-light-meets-water_hua7d52c12b65fe9240ef3d16a160ba49d_12494691_400x0_resize_box_3.png" width="400" height="400" loading="lazy"/>&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Platform:&lt;/strong> fx(hash) &lt;a href="https://www.fxhash.xyz/generative/14938">#14938&lt;/a>&lt;/li>
+&lt;li>&lt;strong>Date:&lt;/strong> June 17th, 2022&lt;/li>
+&lt;li>&lt;strong>Editions:&lt;/strong> 500&lt;/li>
+&lt;li>&lt;strong>Created with:&lt;/strong> &lt;a href="https://github.com/fxhash/fxhash-webpack-boilerplate">fxhash-webpack-boilerplate&lt;/a>, &lt;a href="https://www.typescriptlang.org/">TypeScript&lt;/a>, &lt;a href="https://p5js.org/">p5.js&lt;/a>&lt;/li>
+&lt;/ul></description></item><item><title>How I Drew Birds in Mount Doodle</title><link>https://www.jsliang.art/blog/how-i-drew-birds-in-mount-doodle/</link><pubDate>Sun, 12 Jun 2022 17:37:00 +0800</pubDate><guid>https://www.jsliang.art/blog/how-i-drew-birds-in-mount-doodle/</guid><description>&lt;p>&lt;img
+srcset="
+/blog/how-i-drew-birds-in-mount-doodle/01_hu3a221e4c6f15463b7a8e7bb2435a3164_28012_400x0_resize_box_3.png,
+/blog/how-i-drew-birds-in-mount-doodle/01_hu3a221e4c6f15463b7a8e7bb2435a3164_28012_800x0_resize_box_3.png 2x"
+src="https://www.jsliang.art/blog/how-i-drew-birds-in-mount-doodle/01_hu3a221e4c6f15463b7a8e7bb2435a3164_28012_400x0_resize_box_3.png" width="400" height="400" loading="lazy"/>&lt;/p>
+&lt;p>This small write-up was originally posted as a &lt;a href="https://twitter.com/jsliang_/status/1535919130162827265">Twitter thread&lt;/a> about how I drew birds in &lt;a href="https://www.jsliang.art/projects/mount-doodle/">Mount Doodle&lt;/a>. The algorithm is quite simple yet seems to work well. It might give you some ideas if you also consider drawing birds in a landscape scene. 💡&lt;/p>
+&lt;p>Just like drawing a bird with a pen &amp;ndash; each bird consists of 2 strokes, and each stroke is drawn from the body to the tip of a wing.&lt;/p>
+&lt;p>&lt;img
+srcset="
+/blog/how-i-drew-birds-in-mount-doodle/02_hu21a62de0a449992faf71274a972249b5_107987_500x0_resize_q100_box.jpeg,
+/blog/how-i-drew-birds-in-mount-doodle/02_hu21a62de0a449992faf71274a972249b5_107987_1000x0_resize_q100_box.jpeg 2x"
+src="https://www.jsliang.art/blog/how-i-drew-birds-in-mount-doodle/02_hu21a62de0a449992faf71274a972249b5_107987_500x0_resize_q100_box.jpeg" width="500" height="500" loading="lazy"/>&lt;/p>
+&lt;p>The fundamental form of strokes is just two lines. Each line originates from the center of a circle and ends at a random point of the circumference.&lt;/p>
+&lt;p>&lt;img
+srcset="
+/blog/how-i-drew-birds-in-mount-doodle/03_hub04dcc6031e7a6a9308459977eb8f26e_102854_500x0_resize_q100_box.jpeg,
+/blog/how-i-drew-birds-in-mount-doodle/03_hub04dcc6031e7a6a9308459977eb8f26e_102854_1000x0_resize_q100_box.jpeg 2x"
+src="https://www.jsliang.art/blog/how-i-drew-birds-in-mount-doodle/03_hub04dcc6031e7a6a9308459977eb8f26e_102854_500x0_resize_q100_box.jpeg" width="500" height="500" loading="lazy"/>&lt;/p>
+&lt;p>For each stroke, randomly select a midpoint between the body and the wingtip. Then add some randomness to the position to this mid point. Finally, draw a curve that connects these 3 points (i.e., the &lt;code>body&lt;/code> point, the &lt;code>mid&lt;/code> point, and the &lt;code>wingtip&lt;/code>).&lt;/p>
+&lt;p>&lt;img
+srcset="
+/blog/how-i-drew-birds-in-mount-doodle/04_hu73fac610a0740bec795c9c3e81257a94_106295_500x0_resize_q100_box.jpeg,
+/blog/how-i-drew-birds-in-mount-doodle/04_hu73fac610a0740bec795c9c3e81257a94_106295_1000x0_resize_q100_box.jpeg 2x"
+src="https://www.jsliang.art/blog/how-i-drew-birds-in-mount-doodle/04_hu73fac610a0740bec795c9c3e81257a94_106295_500x0_resize_q100_box.jpeg" width="500" height="500" loading="lazy"/>&lt;/p>
+&lt;p>Draw the curves with bolder stroke weight &amp;ndash; these already look like birds IMHO. 😆&lt;/p>
+&lt;p>&lt;img
+srcset="
+/blog/how-i-drew-birds-in-mount-doodle/05_hu366e3ee00a65668be02cd32662d02d06_70061_500x0_resize_q100_box.jpeg,
+/blog/how-i-drew-birds-in-mount-doodle/05_hu366e3ee00a65668be02cd32662d02d06_70061_1000x0_resize_q100_box.jpeg 2x"
+src="https://www.jsliang.art/blog/how-i-drew-birds-in-mount-doodle/05_hu366e3ee00a65668be02cd32662d02d06_70061_500x0_resize_q100_box.jpeg" width="500" height="500" loading="lazy"/>&lt;/p>
+&lt;p>To make it look more organic, add some randomness to the positions of the body point and the midpoint to create another pair of points: &lt;code>body'&lt;/code> and &lt;code>mid'&lt;/code>. Then connect the points with a curve: &lt;code>body&lt;/code>, &lt;code>mid&lt;/code>, &lt;code>wingtip&lt;/code>, &lt;code>wingtip&lt;/code>, &lt;code>mid'&lt;/code>, &lt;code>body'&lt;/code>.&lt;/p>
+&lt;p>&lt;img
+srcset="
+/blog/how-i-drew-birds-in-mount-doodle/06_hu1205050fe00f89c8695cdb1e06a130bd_111263_500x0_resize_q100_box.jpeg,
+/blog/how-i-drew-birds-in-mount-doodle/06_hu1205050fe00f89c8695cdb1e06a130bd_111263_1000x0_resize_q100_box.jpeg 2x"
+src="https://www.jsliang.art/blog/how-i-drew-birds-in-mount-doodle/06_hu1205050fe00f89c8695cdb1e06a130bd_111263_500x0_resize_q100_box.jpeg" width="500" height="500" loading="lazy"/>&lt;/p>
+&lt;p>Fill the shape with colors. Hmm, it looks a bit weird when the curve twists in the middle. 😅&lt;/p>
+&lt;p>&lt;img
+srcset="
+/blog/how-i-drew-birds-in-mount-doodle/07_hu6485f23e60e2e8e9568294bae27898e8_63230_500x0_resize_q100_box.jpeg,
+/blog/how-i-drew-birds-in-mount-doodle/07_hu6485f23e60e2e8e9568294bae27898e8_63230_1000x0_resize_q100_box.jpeg 2x"
+src="https://www.jsliang.art/blog/how-i-drew-birds-in-mount-doodle/07_hu6485f23e60e2e8e9568294bae27898e8_63230_500x0_resize_q100_box.jpeg" width="500" height="500" loading="lazy"/>&lt;/p>
+&lt;p>A quick fix &amp;ndash; draw thick outlines! Now the odd twists are barely noticeable. 🤣&lt;/p>
+&lt;p>&lt;img
+srcset="
+/blog/how-i-drew-birds-in-mount-doodle/08_hu2087718f3d9859a3c578439b69f44c1f_72796_500x0_resize_q100_box.jpeg,
+/blog/how-i-drew-birds-in-mount-doodle/08_hu2087718f3d9859a3c578439b69f44c1f_72796_1000x0_resize_q100_box.jpeg 2x"
+src="https://www.jsliang.art/blog/how-i-drew-birds-in-mount-doodle/08_hu2087718f3d9859a3c578439b69f44c1f_72796_500x0_resize_q100_box.jpeg" width="500" height="500" loading="lazy"/>&lt;/p>
+&lt;p>Finally, paint both strokes with the same color. And we&amp;rsquo;re done. 🥳&lt;/p>
+&lt;p>&lt;img
+srcset="
+/blog/how-i-drew-birds-in-mount-doodle/01_hu3a221e4c6f15463b7a8e7bb2435a3164_28012_500x0_resize_box_3.png,
+/blog/how-i-drew-birds-in-mount-doodle/01_hu3a221e4c6f15463b7a8e7bb2435a3164_28012_1000x0_resize_box_3.png 2x"
+src="https://www.jsliang.art/blog/how-i-drew-birds-in-mount-doodle/01_hu3a221e4c6f15463b7a8e7bb2435a3164_28012_500x0_resize_box_3.png" width="500" height="500" loading="lazy"/>&lt;/p></description></item><item><title>Mount Doodle</title><link>https://www.jsliang.art/projects/mount-doodle/</link><pubDate>Tue, 31 May 2022 19:18:00 +0800</pubDate><guid>https://www.jsliang.art/projects/mount-doodle/</guid><description>
+&lt;p>&lt;img
+srcset="
+/projects/mount-doodle/mount-doodle_hu601695a403e8095d7d3f93d7dfe431ec_21855387_400x0_resize_box_3.png,
+/projects/mount-doodle/mount-doodle_hu601695a403e8095d7d3f93d7dfe431ec_21855387_800x0_resize_box_3.png 2x"
+src="https://www.jsliang.art/projects/mount-doodle/mount-doodle_hu601695a403e8095d7d3f93d7dfe431ec_21855387_400x0_resize_box_3.png" width="400" height="400" loading="lazy"/>&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Platform:&lt;/strong> fx(hash) &lt;a href="https://www.fxhash.xyz/generative/13936">#13936&lt;/a>&lt;/li>
+&lt;li>&lt;strong>Date:&lt;/strong> May 31th, 2022&lt;/li>
+&lt;li>&lt;strong>Editions:&lt;/strong> 512&lt;/li>
+&lt;li>&lt;strong>Created with:&lt;/strong> &lt;a href="https://github.com/fxhash/fxhash-webpack-boilerplate">fxhash-webpack-boilerplate&lt;/a>, &lt;a href="https://www.typescriptlang.org/">TypeScript&lt;/a>, &lt;a href="https://p5js.org/">p5.js&lt;/a>&lt;/li>
+&lt;li>&lt;strong>Related Post:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;a href="https://www.jsliang.art/blog/how-i-drew-birds-in-mount-doodle/">How I Drew Birds in Mount Doodle&lt;/a>&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;/ul></description></item><item><title>Scribbling</title><link>https://www.jsliang.art/projects/scribbling/</link><pubDate>Sun, 15 May 2022 02:50:00 +0800</pubDate><guid>https://www.jsliang.art/projects/scribbling/</guid><description>
+&lt;p>&lt;img
+srcset="
+/projects/scribbling/scribbling_hu2a718d97a02727db04123edfe982028a_3858607_400x0_resize_box_3.png,
+/projects/scribbling/scribbling_hu2a718d97a02727db04123edfe982028a_3858607_800x0_resize_box_3.png 2x"
+src="https://www.jsliang.art/projects/scribbling/scribbling_hu2a718d97a02727db04123edfe982028a_3858607_400x0_resize_box_3.png" width="400" height="400" loading="lazy"/>&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Platform:&lt;/strong> fx(hash) &lt;a href="https://www.fxhash.xyz/generative/12905">#12905&lt;/a>&lt;/li>
+&lt;li>&lt;strong>Date:&lt;/strong> May 15th, 2022&lt;/li>
+&lt;li>&lt;strong>Editions:&lt;/strong> 128&lt;/li>
+&lt;li>&lt;strong>Created with:&lt;/strong> &lt;a href="https://github.com/fxhash/fxhash-webpack-boilerplate">fxhash-webpack-boilerplate&lt;/a>, &lt;a href="https://www.typescriptlang.org/">TypeScript&lt;/a>, &lt;a href="https://p5js.org/">p5.js&lt;/a>&lt;/li>
+&lt;/ul></description></item><item><title>Interactive Seeds</title><link>https://www.jsliang.art/projects/interacctive-seeds/</link><pubDate>Tue, 03 May 2022 08:23:00 +0800</pubDate><guid>https://www.jsliang.art/projects/interacctive-seeds/</guid><description>
+&lt;p>&lt;img
+srcset="
+/projects/interacctive-seeds/interactive-seeds_huc87f44acf7af33bcbc853729723b6751_221740_400x0_resize_box_3.png,
+/projects/interacctive-seeds/interactive-seeds_huc87f44acf7af33bcbc853729723b6751_221740_800x0_resize_box_3.png 2x"
+src="https://www.jsliang.art/projects/interacctive-seeds/interactive-seeds_huc87f44acf7af33bcbc853729723b6751_221740_400x0_resize_box_3.png" width="400" height="533" loading="lazy"/>&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Platform:&lt;/strong> fx(hash) &lt;a href="https://www.fxhash.xyz/generative/12336">#12336&lt;/a>&lt;/li>
+&lt;li>&lt;strong>Date:&lt;/strong> May 3rd, 2022&lt;/li>
+&lt;li>&lt;strong>Editions:&lt;/strong> 32&lt;/li>
+&lt;li>&lt;strong>Created with:&lt;/strong> &lt;a href="https://github.com/fxhash/fxhash-webpack-boilerplate">fxhash-webpack-boilerplate&lt;/a>, &lt;a href="https://www.typescriptlang.org/">TypeScript&lt;/a>, &lt;a href="https://p5js.org/">p5.js&lt;/a>&lt;/li>
+&lt;/ul></description></item><item><title>Top of Mountains</title><link>https://www.jsliang.art/projects/top-of-mountains/</link><pubDate>Tue, 26 Apr 2022 23:38:00 +0800</pubDate><guid>https://www.jsliang.art/projects/top-of-mountains/</guid><description>
+&lt;p>&lt;img
+srcset="
+/projects/top-of-mountains/top-of-mountains_huccddfbf0391e716b17408306fb62d6c9_10524213_400x0_resize_box_3.png,
+/projects/top-of-mountains/top-of-mountains_huccddfbf0391e716b17408306fb62d6c9_10524213_800x0_resize_box_3.png 2x"
+src="https://www.jsliang.art/projects/top-of-mountains/top-of-mountains_huccddfbf0391e716b17408306fb62d6c9_10524213_400x0_resize_box_3.png" width="400" height="400" loading="lazy"/>&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Platform:&lt;/strong> fx(hash) &lt;a href="https://www.fxhash.xyz/generative/11993">#11993&lt;/a>&lt;/li>
+&lt;li>&lt;strong>Date:&lt;/strong> April 26th, 2022&lt;/li>
+&lt;li>&lt;strong>Editions:&lt;/strong> 32&lt;/li>
+&lt;li>&lt;strong>Created with:&lt;/strong> &lt;a href="https://github.com/fxhash/fxhash-webpack-boilerplate">fxhash-webpack-boilerplate&lt;/a>, &lt;a href="https://www.typescriptlang.org/">TypeScript&lt;/a>, &lt;a href="https://p5js.org/">p5.js&lt;/a>&lt;/li>
+&lt;/ul></description></item><item><title>Pastel Grid</title><link>https://www.jsliang.art/projects/pastel-grid/</link><pubDate>Tue, 19 Apr 2022 15:11:00 +0800</pubDate><guid>https://www.jsliang.art/projects/pastel-grid/</guid><description>
+&lt;p>&lt;img
+srcset="
+/projects/pastel-grid/pastel-grid_hu4be4a176dd1a3abd66fcdd879f365034_1720899_400x0_resize_box_3.png,
+/projects/pastel-grid/pastel-grid_hu4be4a176dd1a3abd66fcdd879f365034_1720899_800x0_resize_box_3.png 2x"
+src="https://www.jsliang.art/projects/pastel-grid/pastel-grid_hu4be4a176dd1a3abd66fcdd879f365034_1720899_400x0_resize_box_3.png" width="400" height="377" loading="lazy"/>&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Platform:&lt;/strong> fx(hash) &lt;a href="https://www.fxhash.xyz/generative/11505">#11505&lt;/a>&lt;/li>
+&lt;li>&lt;strong>Date:&lt;/strong> April 19th, 2022&lt;/li>
+&lt;li>&lt;strong>Editions:&lt;/strong> 16&lt;/li>
+&lt;li>&lt;strong>Created with:&lt;/strong> &lt;a href="https://github.com/fxhash/fxhash-webpack-boilerplate">fxhash-webpack-boilerplate&lt;/a>, &lt;a href="https://www.typescriptlang.org/">TypeScript&lt;/a>, &lt;a href="https://p5js.org/">p5.js&lt;/a>&lt;/li>
+&lt;/ul></description></item></channel></rss>
